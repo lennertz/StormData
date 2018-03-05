@@ -1,0 +1,165 @@
+---
+title: "Reproducible Research Peer Assignment - Storm Data"
+author: "Lora Lennertz"
+date: "March 5, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+##NOAA Storm Weather Data Analysis
+
+This is an analysis of the NOAA storm data. The data for this analysis came in the form of a comma-separated-value file compressed via the bzip2 at https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2.  Information on the data is available at the FAQ page https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf while information on variables is available at https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf 
+
+##Synopsis
+
+My analysis uses storm data from the NOAA National Weather Service listed above.  This data was collected between 1950 - 2011 to study which weather events effect human injuries and fatalities and those responsible for high levels of property and crop damage. The data were reviewed. Due to input anomalies, weather categories were applied. Impact in the areas of injuries, fatalities and costs were summed on these categories. Some findings from this analysis include:
+
+    Tornadoes, Tropical Storms, Hurricanes and Typhoons cause the highest number of total injuries 
+            and fatalities in the U.S.
+    Excessive heat is the second greatest source of human fatalities and third greatest source of injuries
+    Flooding is responsible for the highest economic impact by property and crop damaage
+    Tornadoes, Tropical Storms, Hurricanes and Typhoons causes a relatively high number of cost/impact per event.
+
+##Data processing
+
+  Load Data libraries for analysis and graphing
+```{r}
+# Loading libraries for data analyisis and data plotting
+library (dplyr)
+library (ggplot2)
+```
+  Load Data and create dataframe
+```{r}
+# Load data set and make initial dataframe
+if(!exists("StormData")){
+  download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", "repdata-data-StormData.csv.bz2")
+  StormData <- read.csv ("repdata-data-StormData.csv.bz2")
+}
+
+```
+  Let's investigate the variable information
+
+```{r}
+#Investigating StormData variables
+names(StormData)
+head(StormData)
+```
+We will begin by segmenting the data to create two smaller datasets -- one for analysing injuries and fatalities and one for working with economic data
+
+```{r}
+#Begin data processing - create dataframe  subset for injuries and fatalities and for damages
+Fatal <- subset(StormData, FATALITIES> 0 | INJURIES>0)
+EconData <- subset(StormData, PROPDMG > 0 |  CROPDMG > 0)
+```
+
+We will now begin processing the fatalities and injury data to get a brief look at the results
+```{r}
+#Sum and sort fatalities
+Fatal <- Fatal[order(Fatal$FATALITIES, decreasing = TRUE),]
+
+total_fatal <- sum(StormData$FATALITIES)
+total_injuries <- sum(StormData$INJURIES)
+
+Fatal_sum <- summarise(group_by(Fatal,EVTYPE),FATALITIES = sum(FATALITIES), INJURIES = sum(INJURIES))
+Fatal_sum$EVTYPE
+```
+After looking at the EVTYPE variable in this view, it is apparent that the data is not clean and there are issues of spellings and capitalization.  To create a cleaner dataset, we will convert the headings to include variations on spellings.  In addition some similar events such as rain and hail are gathered together to create 20 headings (including an "other" category).  A secondary goal was to limit the "other" category so that the results are a smaller representation of the whole.  We are gathering the information into a new variable called CATEGORY.
+
+```{r}
+# We note that the data has a number of issues regarding spelling and capitalization errors
+cat_event <- c("ICE|ICY", "FREEZE|FROST", "SNOW|AVALANCHE|WINTER|BLIZZARD|SLEET", "COLD", "DUST", "FLOOD|FLD", "FIRE|WILDFIRE", "RAIN|HAIL", "SURF|WAVE|TSUNAMI|SURGE", "WIND|MICROBURST", "COLD", 
+               "DROUGHT", "FOG", "HEAT|WARM", "HURRICANE|TYPHOON|TORNADO|TROPICAL", "LIGHTNING", "LAND|SLIDE|MUD", "TIDE|TIDAL", "RAIN|HAIL|DRIZZLE|RAINSTORM", "THUNDERSTORM|TSTM", "WIND|GUST|GUSTY WIND")
+Fatal$CATEGORY = "Other"
+for(i in cat_event){
+  Fatal[grep(i, Fatal$EVTYPE, ignore.case = TRUE ),"CATEGORY"] <- i
+}
+
+#Let's create summation tables on the data on fatalities and injuries
+Fatal_sum <- summarise(group_by(Fatal,CATEGORY),FATALITIES = sum(FATALITIES))
+Fatal_sum <- Fatal_sum[order(Fatal_sum$FATALITIES, decreasing = TRUE),]
+Injuries_sum <- summarise(group_by(Fatal,CATEGORY), INJURIES = sum(INJURIES))
+Injuries_sum <- Injuries_sum[order(Injuries_sum$INJURIES, decreasing = TRUE),]
+print(Fatal_sum)
+print(Injuries_sum)
+```
+Now we will begin processing the subset of economic data.  We are already aware that there were some incontinuities with the data entry regarding the exponential information (is it hundreds, billions, etc.) as well as the earlier problem with categorizations.
+```{r}
+#let's process data for environmental damage
+
+
+print(unique(EconData$PROPDMGEXP))
+print(unique(EconData$CROPDMGEXP))
+
+```
+Here we combine different versions of the exponent fields for both property and crop damage
+
+```{r}
+EXP <- c("1","2|h|H","3|k|K","4","5","6|m|M","7","8","9|b|B")
+EconData$PROP_TEN <- 1
+EconData$CROP_TEN <- 1
+x <- 1
+for(i in EXP){
+  x <- x * 10
+  EconData$PROP_TEN[grep(i, EconData$PROPDMGEXP, ignore.case = TRUE )] <- x
+  EconData$CROP_TEN[grep(i, EconData$CROPDMGEXP, ignore.case = TRUE )] <- x
+}
+
+DAMAGE<- data.frame(EVTYPE = EconData$EVTYPE, COST = EconData$PROPDMG*EconData$PROP_TEN + EconData$CROPDMG*EconData$CROP_TEN)
+
+#We then aggregate each storm by EVTYPE and categorize each storm so we can get a more accurate aggregation of the damage caused by storms.
+
+DAMAGE_SUM <- summarize(group_by(DAMAGE,EVTYPE), COST = sum(COST))
+DAMAGE_SUM <- DAMAGE_SUM[order(DAMAGE_SUM$COST, decreasing = TRUE),]
+head(DAMAGE_SUM,20)
+
+
+#We see the initial aggregated sums by EVTYPE and make a list of categories search for and combine similar or same storms. Similar terms will used " | " as an OR search function for GREP. For example: “FLOOD|FLD”
+DAMAGE_SUM$CATEGORY = "Other"
+cat_event <- c("ICE|ICY", "FREEZE|FROST", "SNOW|AVALANCHE|WINTER|BLIZZARD|SLEET", "COLD", "DUST", "FLOOD|FLD", "FIRE|WILDFIRE", "RAIN|HAIL", "SURF|WAVE|TSUNAMI|SURGE", "WIND|MICROBURST", "COLD", 
+"DROUGHT", "FOG", "HEAT|WARM", "HURRICANE|TYPHOON|TORNADO|TROPICAL", "LIGHTNING", "LAND|SLIDE|MUD", "TIDE|TIDAL", "RAIN|HAIL|DRIZZLE|RAINSTORM", "THUNDERSTORM|TSTM", "WIND|GUST|GUSTY WIND")
+for(i in cat_event){
+  DAMAGE_SUM[grep(i, DAMAGE_SUM$EVTYPE, ignore.case = TRUE),"CATEGORY"] <- i
+}
+
+DAMAGE_SUM2 <- summarize(group_by(DAMAGE_SUM,CATEGORY),COST = sum(COST))
+DAMAGE_SUM2 <- DAMAGE_SUM2[order(DAMAGE_SUM2$COST, decreasing = TRUE),]
+DAMAGE_SUM2
+```
+
+#RESULTS
+
+We are now ready to plot the previous charts to emphasize the results visually
+
+```{r}
+hh.p1 <- ggplot(Fatal_sum,aes(x = CATEGORY, y = FATALITIES)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Human Health Impact of Weather Events - Fatalities") +
+  xlab("Category of Event") + ylab("Fatalities recorded")
+
+print(hh.p1)
+
+hh.p2 <- ggplot(Injuries_sum,aes(x = CATEGORY, y = INJURIES)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Human Health Impact of Weather Events - Injuries") +
+  xlab("Category of Event") + ylab("Injuries recorded")
+
+print(hh.p2)
+
+hh.p3 <- ggplot(DAMAGE_SUM2,aes(x = CATEGORY, y = COST)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Economic Impact of Weather Events") +
+  xlab("Category of Event") + ylab("Costs")
+
+print(hh.p3)
+
+```
+# Recommendations for further research
+
+Wind and flood damage seem to be significant sources of fatalities and injuries. It might be of interest to separate out those storm events which are often characterized by high winds and signficant flooding to provide a clearer picture of the human impact of wind and water.
